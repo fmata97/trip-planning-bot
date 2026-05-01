@@ -4,6 +4,10 @@ A Telegram group chat bot that helps friends plan trips together by discovering,
 
 Built on Cloudflare Workers with a persistent AI agent per chat group.
 
+## Demo
+
+[![Watch the demo](https://img.youtube.com/vi/0TyANoptT9U/maxresdefault.jpg)](https://youtu.be/0TyANoptT9U)
+
 ## How It Works
 
 1. Tell the bot where you're going: `/plan Lisbon, food and history, 3 days, $100/person`
