@@ -99,26 +99,29 @@ export function buildTools(env: Env, agent: TripAgent) {
 						imageUrl: s.imageUrl,
 					}));
 					// Reset the shortlist when the user pivots to a different
-					// destination — keeps Lisbon and Porto cards from mixing
-					// in the same /finalize tally. Multi-themed searches for
-					// the SAME destination keep accumulating, deduped by code.
+					// destination so the Lisbon poll doesn't bleed into Porto.
+					// Multi-themed searches for the SAME destination accumulate
+					// (deduped) so /finalize can look up URLs for any voted code.
 					const prevDestinationId = agent.state.trip.destinationId;
 					const destinationChanged =
 						prevDestinationId !== undefined && prevDestinationId !== dest.destinationId;
 					const baseCandidates = destinationChanged ? [] : agent.state.candidates;
 					const baseVotes = destinationChanged ? {} : agent.state.votes;
 					const seen = new Set(baseCandidates.map((c) => c.productCode));
-					const fresh = candidates.filter((c) => !seen.has(c.productCode));
-					const merged = [...baseCandidates, ...fresh];
+					const newToAdd = candidates.filter((c) => !seen.has(c.productCode));
+					const merged = [...baseCandidates, ...newToAdd];
 					const nextState: TripState = {
 						...agent.state,
 						trip: { ...agent.state.trip, destination: dest.name, destinationId: dest.destinationId },
 						candidates: merged,
 						votes: baseVotes,
+						activePoll: destinationChanged ? undefined : agent.state.activePoll,
 					};
 					agent.setState(nextState);
-					// Tell the worker which cards to render this turn.
-					agent.proposedThisTurn = [...agent.proposedThisTurn, ...fresh];
+					// proposedThisTurn = the FULL current search result (not just
+					// new-to-state ones) so re-running /plan Lisbon still posts a
+					// fresh poll with the same activities.
+					agent.proposedThisTurn = [...agent.proposedThisTurn, ...candidates];
 					return { destination: dest.name, count: summarised.length, products: summarised };
 				} catch (err) {
 					if (err instanceof ViatorError) {

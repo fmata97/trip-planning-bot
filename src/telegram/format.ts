@@ -4,6 +4,20 @@ import type { ViatorProduct } from "../tools/viator";
 import type { CandidateProduct, VoteCounts } from "../agent";
 import { decorateAffiliateUrl } from "../affiliate";
 
+// Telegram poll option text — capped at 100 chars by the API. Format the
+// title plus a short price/rating suffix; truncate the title if it'd push
+// us over.
+export function formatPollOption(c: CandidateProduct): string {
+	const meta: string[] = [];
+	if (typeof c.priceFrom === "number") meta.push(`${c.currency ?? "USD"} ${c.priceFrom.toFixed(0)}`);
+	if (typeof c.rating === "number") meta.push(`${c.rating.toFixed(1)}★`);
+	const suffix = meta.length ? ` (${meta.join(", ")})` : "";
+	const maxTitleLen = Math.max(20, 100 - suffix.length);
+	const title =
+		c.title.length > maxTitleLen ? `${c.title.slice(0, maxTitleLen - 1)}…` : c.title;
+	return title + suffix;
+}
+
 // Inline keyboard for a single activity card. Encodes the productCode in
 // the callback_data so the vote handler can look up which item was voted on.
 // Telegram caps callback_data at 64 bytes; "v:<code>:up" is comfortably under.

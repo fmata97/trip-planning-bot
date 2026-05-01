@@ -25,15 +25,26 @@ export interface CandidateProduct {
 }
 
 // Votes are keyed by `${productCode}:up` / `${productCode}:down`. Values are
-// arrays of user IDs (stringified). Lets us answer per-product tallies and
-// per-user "have I already voted" without extra plumbing.
+// arrays of user IDs (stringified). Kept as a fallback for the legacy
+// inline-button voting path; live voting now uses Telegram polls.
 export type VoteMap = Record<string, string[]>;
+
+// Tracks the most recent Telegram poll posted in this chat so /finalize can
+// look it up via stopPoll() and tally votes against the productCode list.
+export interface ActivePoll {
+	chatId: number;
+	messageId: number;
+	pollId: string;
+	productCodes: string[]; // index-aligned with the poll's options
+	question: string;
+}
 
 export interface TripState {
 	messages: Array<{ role: "user" | "assistant"; content: string }>;
 	trip: TripDetails;
 	candidates: CandidateProduct[];
 	votes: VoteMap;
+	activePoll?: ActivePoll;
 }
 
 export interface AgentReply {
@@ -176,6 +187,58 @@ export class TripAgent extends Agent<Env, TripState> {
 			up: (this.state.votes[`${productCode}:up`] ?? []).length,
 			down: (this.state.votes[`${productCode}:down`] ?? []).length,
 		};
+	}
+
+	// Called by the worker after it sends a Telegram poll. Records what the
+	// poll was about so /finalize can stop it and map option index → product.
+	async registerPoll(poll: ActivePoll): Promise<void> {
+		this.setState({ ...this.state, activePoll: poll });
+	}
+
+	async getActivePoll(): Promise<ActivePoll | undefined> {
+		return this.state.activePoll;
+	}
+
+	async getCandidates(): Promise<CandidateProduct[]> {
+		return this.state.candidates;
+	}
+
+	// Used by /finalize after stopPoll: takes a vote count per option (in the
+	// same order as the poll's productCodes) and returns the rendered summary.
+	async finalizeFromPoll(voteCountsByOption: number[]): Promise<{ text: string }> {
+		const poll = this.state.activePoll;
+		if (!poll) return { text: "No poll to finalize. Run /plan first." };
+		const candMap = new Map(this.state.candidates.map((c) => [c.productCode, c]));
+
+		const tallied = poll.productCodes
+			.map((code, i) => ({ code, votes: voteCountsByOption[i] ?? 0 }))
+			.filter((t) => t.votes > 0)
+			.sort((a, b) => b.votes - a.votes)
+			.slice(0, 5)
+			.map((t) => ({ ...candMap.get(t.code), votes: t.votes }))
+			.filter((t) => t.productCode);
+
+		if (tallied.length === 0) {
+			return { text: "Nobody voted yet — open the poll above and tap your picks, then /finalize again." };
+		}
+
+		const lines = tallied.map((t, i) => {
+			const meta: string[] = [];
+			if (typeof t.priceFrom === "number") meta.push(`from ${t.currency ?? "USD"} ${t.priceFrom.toFixed(0)}`);
+			meta.push(`${t.votes} vote${t.votes === 1 ? "" : "s"}`);
+			const link = t.productUrl ? ` — [Book on Viator](${t.productUrl})` : "";
+			return `${i + 1}. **${t.title}** — ${meta.join(", ")}${link}`;
+		});
+
+		const totalLow = tallied.reduce((sum, t) => sum + (t.priceFrom ?? 0), 0);
+		const currency = tallied[0]?.currency ?? "USD";
+		const trip = this.state.trip;
+		const travelers = trip.travelers ?? 1;
+		const totalGroup = totalLow * travelers;
+
+		const header = trip.destination ? `**Top picks for ${trip.destination}**` : "**Top picks**";
+		const footer = `\nPer-person from ~${currency} ${totalLow.toFixed(0)}${travelers > 1 ? ` · group of ${travelers} from ~${currency} ${totalGroup.toFixed(0)}` : ""}`;
+		return { text: `${header}\n\n${lines.join("\n")}\n${footer}` };
 	}
 
 	// Produces the /finalize summary: top-voted candidates with totals.

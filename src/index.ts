@@ -1,9 +1,9 @@
-import { Bot, webhookCallback, InlineKeyboard } from "grammy";
+import { Bot, webhookCallback } from "grammy";
 import type { Context } from "grammy";
 import type { UserFromGetMe } from "grammy/types";
 import { getAgentByName } from "agents";
 import { TripAgent } from "./agent";
-import { llamaMarkdownToTelegramHTML, sendCandidateCard, buildVoteKeyboard } from "./telegram/format";
+import { llamaMarkdownToTelegramHTML, formatPollOption } from "./telegram/format";
 
 export { TripAgent };
 
@@ -30,14 +30,32 @@ async function replyWithAgent(ctx: Context, env: Env, text: string): Promise<voi
 		});
 	}
 
-	// Phase 3: render one Telegram card per candidate proposed this turn,
-	// with vote buttons. Sequential to preserve order; each is its own message.
-	for (const card of reply.cards) {
-		const counts = await agent.getVoteCounts(card.productCode);
+	// Phase 3 (revised): instead of N cards with inline buttons, post a
+	// single native Telegram poll. Better group-chat UX and lets us tally
+	// via stopPoll() at /finalize.
+	if (reply.cards.length > 0) {
+		// Telegram caps polls at 10 options.
+		const slice = reply.cards.slice(0, 10);
+		const options = slice.map((c) => formatPollOption(c));
+		const productCodes = slice.map((c) => c.productCode);
+		const question = `Which to book?${reply.cards.length > 10 ? ` (top ${slice.length})` : ""}`;
 		try {
-			await sendCandidateCard(ctx, card, counts);
+			const pollMsg = await ctx.replyWithPoll(question, options, {
+				is_anonymous: false,
+				allows_multiple_answers: true,
+			});
+			const pollId = pollMsg.poll?.id;
+			if (pollId) {
+				await agent.registerPoll({
+					chatId,
+					messageId: pollMsg.message_id,
+					pollId,
+					productCodes,
+					question,
+				});
+			}
 		} catch (err) {
-			console.error("sendCandidateCard failed", { productCode: card.productCode, err: String(err) });
+			console.error("sendPoll failed", { err: String(err) });
 		}
 	}
 }
@@ -89,52 +107,29 @@ export default {
 			console.log("cmd=/finalize", { chatId });
 			if (!chatId) return;
 			const agent = await getAgent(env, chatId);
-			const summary = await agent.finalize();
+			const poll = await agent.getActivePoll();
+
+			let summary;
+			if (poll) {
+				try {
+					const stopped = await ctx.api.stopPoll(poll.chatId, poll.messageId);
+					const voteCountsByOption = stopped.options.map((o) => o.voter_count ?? 0);
+					summary = await agent.finalizeFromPoll(voteCountsByOption);
+				} catch (err) {
+					console.error("stopPoll failed", String(err));
+					// Poll might already be closed — fall back to legacy tally
+					summary = await agent.finalize();
+				}
+			} else {
+				summary = await agent.finalize();
+			}
+
 			await ctx.reply(llamaMarkdownToTelegramHTML(summary.text), {
 				parse_mode: "HTML",
 				link_preview_options: { is_disabled: true },
 			});
 		});
 
-		// Vote callbacks. callback_data is "v:<productCode>:<up|down>".
-		bot.callbackQuery(/^v:(.+):(up|down)$/, async (ctx) => {
-			const productCode = ctx.match[1];
-			const kind = ctx.match[2] as "up" | "down";
-			const chatId = ctx.chat?.id;
-			const userId = ctx.from?.id;
-			if (!chatId || !userId) {
-				await ctx.answerCallbackQuery();
-				return;
-			}
-			const agent = await getAgent(env, chatId);
-			const counts = await agent.vote(productCode, String(userId), kind);
-			console.log("vote", { chatId, userId, productCode, kind, counts });
-			// Refresh the buttons in place to reflect the new tally.
-			const newKb = new InlineKeyboard()
-				.text(`👍 ${counts.up}`, `v:${productCode}:up`)
-				.text(`👎 ${counts.down}`, `v:${productCode}:down`);
-			// Preserve the "View on Viator" url button if it was on the original message.
-			const original = ctx.callbackQuery.message?.reply_markup?.inline_keyboard ?? [];
-			for (const row of original.slice(1)) {
-				for (const btn of row) {
-					if ("url" in btn && btn.url) {
-						newKb.row().url(btn.text, btn.url);
-					}
-				}
-			}
-			try {
-				await ctx.editMessageReplyMarkup({ reply_markup: newKb });
-			} catch (err) {
-				// Telegram returns "message not modified" if the keyboard happens
-				// to match — harmless.
-				console.log("editMessageReplyMarkup noop or failed", String(err));
-			}
-			await ctx.answerCallbackQuery({
-				text: kind === "up" ? "👍 noted" : "👎 noted",
-			});
-			// Use the now-rebuilt keyboard helper for a sanity assertion (no-op runtime).
-			void buildVoteKeyboard;
-		});
 
 		// Catch-all: any other text reaching us goes to the agent.
 		// In groups with privacy mode ON this only fires on @mentions / replies
