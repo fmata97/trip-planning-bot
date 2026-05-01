@@ -3,7 +3,7 @@ import type { Context } from "grammy";
 import type { Update, UserFromGetMe } from "grammy/types";
 import { getAgentByName } from "agents";
 import { TripAgent } from "./agent";
-import { llamaMarkdownToTelegramHTML, formatPollOption } from "./telegram/format";
+import { llamaMarkdownToTelegramHTML, formatPollOption, sendActivityCardWithLink } from "./telegram/format";
 
 export { TripAgent };
 
@@ -23,22 +23,27 @@ async function replyWithAgent(ctx: Context, env: Env, text: string): Promise<voi
 	const agent = await getAgent(env, chatId);
 	const reply = await agent.handleMessage(text, userId);
 
-	if (reply.text) {
-		await ctx.reply(llamaMarkdownToTelegramHTML(reply.text), {
-			parse_mode: "HTML",
-			link_preview_options: { is_disabled: true },
-		});
-	}
-
-	// Phase 3 (revised): instead of N cards with inline buttons, post a
-	// single native Telegram poll. Better group-chat UX and lets us tally
-	// via stopPoll() at /finalize.
+	// When the agent proposed activities this turn, render them as one card
+	// per activity (image + title + Book on Viator link) followed by a poll
+	// whose options are index-aligned with the cards. The LLM's text summary
+	// is suppressed in that case — the cards already say everything, and the
+	// LLM text was prone to mangled markdown links.
 	if (reply.cards.length > 0) {
-		// Telegram caps polls at 10 options.
+		// Telegram caps polls at 10 options, so cap cards too to keep the
+		// 1:1 mapping intact.
 		const slice = reply.cards.slice(0, 10);
+
+		for (let i = 0; i < slice.length; i++) {
+			try {
+				await sendActivityCardWithLink(ctx, slice[i], i + 1);
+			} catch (err) {
+				console.error("sendActivityCardWithLink failed", { i, err: String(err) });
+			}
+		}
+
 		const options = slice.map((c) => formatPollOption(c));
 		const productCodes = slice.map((c) => c.productCode);
-		const question = `Which to book?${reply.cards.length > 10 ? ` (top ${slice.length})` : ""}`;
+		const question = `Vote your picks — then run /finalize${reply.cards.length > 10 ? ` (top ${slice.length})` : ""}`;
 		try {
 			const pollMsg = await ctx.replyWithPoll(question, options, {
 				is_anonymous: false,
@@ -57,6 +62,14 @@ async function replyWithAgent(ctx: Context, env: Env, text: string): Promise<voi
 		} catch (err) {
 			console.error("sendPoll failed", { err: String(err) });
 		}
+		return;
+	}
+
+	if (reply.text) {
+		await ctx.reply(llamaMarkdownToTelegramHTML(reply.text), {
+			parse_mode: "HTML",
+			link_preview_options: { is_disabled: true },
+		});
 	}
 }
 
@@ -74,8 +87,8 @@ function buildBot(env: Env): Bot {
 				"👋 I help group chats plan trips with Viator activities.\n\n" +
 					"<b>How it works:</b>\n" +
 					"1. Tell me where you're going: <code>/plan Lisbon, food and history, 3 days, $100/person</code>\n" +
-					"2. I'll send activity cards. Everyone votes 👍 / 👎 on each.\n" +
-					"3. Run <code>/finalize</code> for the highest-voted picks + total cost.\n\n" +
+					"2. I'll send one card per activity (with a Book on Viator link), then a poll.\n" +
+					"3. Vote in the poll, then run <code>/finalize</code> for the winning picks + total cost.\n\n" +
 					"You can also just chat: <i>plan us 3 days in Rome late May</i>.",
 				{ parse_mode: "HTML" },
 			);

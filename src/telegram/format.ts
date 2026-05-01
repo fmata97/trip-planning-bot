@@ -4,6 +4,28 @@ import type { ViatorProduct } from "../tools/viator";
 import type { CandidateProduct, VoteCounts } from "../agent";
 import { decorateAffiliateUrl } from "../affiliate";
 
+// Card for /plan: image + title/price/desc + a single "Book on Viator" link
+// button. Voting happens via the native Telegram poll posted after the cards,
+// so we deliberately omit 👍/👎 buttons here.
+export async function sendActivityCardWithLink(ctx: Context, c: CandidateProduct, index: number): Promise<void> {
+	const title = htmlEscapeForCard(c.title);
+	const meta: string[] = [];
+	if (typeof c.priceFrom === "number") meta.push(`from ${c.currency ?? "USD"} ${c.priceFrom.toFixed(0)}`);
+	if (typeof c.rating === "number") meta.push(`⭐ ${c.rating.toFixed(1)}`);
+	const metaLine = meta.length ? `<i>${htmlEscapeForCard(meta.join(" · "))}</i>` : "";
+	const desc = c.shortDescription ? htmlEscapeForCard(c.shortDescription).slice(0, 600) : "";
+	const caption = [`<b>${index}. ${title}</b>`, metaLine, desc].filter(Boolean).join("\n").slice(0, 1024);
+
+	const kb = new Keyboard();
+	if (c.productUrl) kb.url("🔗 Book on Viator", c.productUrl);
+
+	if (c.imageUrl) {
+		await ctx.replyWithPhoto(c.imageUrl, { caption, parse_mode: "HTML", reply_markup: kb });
+	} else {
+		await ctx.reply(caption, { parse_mode: "HTML", reply_markup: kb, link_preview_options: { is_disabled: true } });
+	}
+}
+
 // Telegram poll option text — capped at 100 chars by the API. Format the
 // title plus a short price/rating suffix; truncate the title if it'd push
 // us over.
