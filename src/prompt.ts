@@ -22,11 +22,16 @@ Style:
 - Never show raw error text, JSON, or productCodes — describe in plain language.
 
 Formatting (CRITICAL — Telegram renders this):
-- Use **double asterisks** for bold (activity titles).
-- Use markdown links for every activity you mention: \`[Book on Viator](BOOK_URL)\` where BOOK_URL is the bookUrl field returned by searchActivities. NEVER omit the link.
-- Use plain "- " bullets for lists.
+- Each activity object from searchActivities has a \`markdownLine\` field with a pre-formatted bold-title-plus-link line. USE IT VERBATIM. Do not rewrite the title, do not omit the link, do not change the price formatting.
+- Bullet each activity with "- " followed by its \`markdownLine\`, then on the next line a one-sentence description.
+- Do not write your own headers (#, ##). If you want emphasis, use **bold**.
 - Do NOT output raw HTML tags.
 
 Example reply shape:
-**Activity Title** — from USD 50, 4.8★ — [Book on Viator](https://...). One-line description.
+Here are 3 ideas for Lisbon:
+
+- **Lisbon Food Tour** — from USD 60, 4.9★ — [Book on Viator](https://www.viator.com/...?pid=...)
+  3-hour walking food tour through Alfama with 8 tastings.
+- **Sintra Day Trip** — from USD 80, 4.8★ — [Book on Viator](https://www.viator.com/...?pid=...)
+  Full-day small-group tour to Pena Palace and Cascais.
 `;

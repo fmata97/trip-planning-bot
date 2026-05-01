@@ -26,6 +26,8 @@ export function llamaMarkdownToTelegramHTML(input: string): string {
 	// Markdown links: [text](url) — must come before bold/italic so the URL
 	// isn't munged. URL was already html-escaped, &amp; in URLs is fine.
 	s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2">$1</a>');
+	// Headers: Telegram has no <h1>; render as bold on their own line.
+	s = s.replace(/^#{1,6}\s+(.+?)\s*$/gm, "<b>$1</b>");
 	// Bold: **text** or __text__
 	s = s.replace(/\*\*([^*\n]+?)\*\*/g, "<b>$1</b>");
 	s = s.replace(/__([^_\n]+?)__/g, "<b>$1</b>");

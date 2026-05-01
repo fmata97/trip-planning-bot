@@ -25,9 +25,25 @@ export function buildTools(env: Env, agent: TripAgent) {
 		const rrp = p.recommendedRetailPrice as { fromPrice?: number; amount?: number; currency?: string } | undefined;
 		const priceFrom = rrp?.fromPrice ?? rrp?.amount ?? p.pricing?.summary?.fromPrice;
 		const currency = rrp?.currency ?? p.pricing?.currency ?? "USD";
+		const rating = p.rating ?? p.reviews?.combinedAverageRating;
+		const reviewCount = p.reviewCount ?? p.reviews?.totalReviews;
 		// Affiliate-decorated booking URL — falls back to raw productUrl if
-		// VIATOR_AFFILIATE_ID is unset. The LLM is instructed to surface this.
+		// VIATOR_AFFILIATE_ID is unset.
 		const bookUrl = decorateAffiliateUrl(p.productUrl, env.VIATOR_AFFILIATE_ID);
+
+		// Pre-formatted line the LLM is instructed to copy verbatim. Doing
+		// the formatting here removes the chance of the model dropping the
+		// link when summarising 5 activities at once.
+		const priceStr = typeof priceFrom === "number" ? `from ${currency} ${priceFrom.toFixed(0)}` : "";
+		const ratingStr = typeof rating === "number" ? `${rating.toFixed(1)}★` : "";
+		const meta = [priceStr, ratingStr].filter(Boolean).join(", ");
+		const link = bookUrl ? `[Book on Viator](${bookUrl})` : "";
+		const markdownLine = [
+			`**${p.title}**`,
+			meta && `— ${meta}`,
+			link && `— ${link}`,
+		].filter(Boolean).join(" ");
+
 		return {
 			productCode: p.productCode,
 			title: p.title,
@@ -35,9 +51,10 @@ export function buildTools(env: Env, agent: TripAgent) {
 			duration: p.duration?.description,
 			priceFrom,
 			currency,
-			rating: p.rating ?? p.reviews?.combinedAverageRating,
-			reviewCount: p.reviewCount ?? p.reviews?.totalReviews,
+			rating,
+			reviewCount,
 			bookUrl,
+			markdownLine,
 		};
 	}
 
