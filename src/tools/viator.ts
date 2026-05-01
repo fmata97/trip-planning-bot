@@ -133,7 +133,7 @@ export class ViatorClient {
 	// names to numeric IDs. Returns the top hit, or null if none.
 	async resolveDestination(text: string): Promise<ViatorDestinationHit | null> {
 		const body = {
-			searchQuery: text,
+			searchTerm: text,
 			searchType: "DESTINATIONS",
 			currency: this.currencyCode,
 			pagination: { offset: 0, limit: 5 },
@@ -173,9 +173,9 @@ export class ViatorClient {
 
 	// POST /search/freetext (PRODUCTS) — natural-language product search when
 	// destination/tag IDs aren't pre-resolved.
-	async freetextProducts(searchQuery: string, opts?: { tags?: number[]; limit?: number }): Promise<ViatorSearchResponse> {
+	async freetextProducts(searchTerm: string, opts?: { tags?: number[]; limit?: number }): Promise<ViatorSearchResponse> {
 		const body: Record<string, unknown> = {
-			searchQuery,
+			searchTerm,
 			searchType: "PRODUCTS",
 			currency: this.currencyCode,
 			pagination: { offset: 0, limit: opts?.limit ?? 5 },
