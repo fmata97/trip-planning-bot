@@ -138,8 +138,30 @@ export class ViatorClient {
 		if (!r.ok) {
 			throw new ViatorError("search/freetext", r.status, await r.text());
 		}
-		const json = (await r.json()) as { destinations?: { results?: ViatorDestinationHit[] } };
-		return json.destinations?.results?.[0] ?? null;
+		const json = (await r.json()) as Record<string, unknown>;
+		// Log a trimmed payload so we can see the actual shape in `wrangler tail`.
+		console.log("viator.freetext.response", JSON.stringify(json).slice(0, 800));
+
+		// Viator's response shape can vary; try a few known-plausible paths.
+		const destinationsField = json.destinations as unknown;
+		const candidates: unknown[] = Array.isArray(destinationsField)
+			? destinationsField
+			: ((destinationsField as { results?: unknown[] } | undefined)?.results ?? []);
+		const top = candidates[0] as Record<string, unknown> | undefined;
+		if (!top) return null;
+
+		const rawId = top.destinationId ?? top.id ?? top.ref ?? top.destinationRef;
+		const numericId = typeof rawId === "number" ? rawId : Number(rawId);
+		if (!Number.isFinite(numericId)) {
+			console.log("viator.freetext.no-id-on-top-hit", JSON.stringify(top));
+			return null;
+		}
+		return {
+			destinationId: numericId,
+			name: (top.name as string) ?? (top.destinationName as string) ?? text,
+			type: top.type as string | undefined,
+			parentDestinationId: top.parentDestinationId as number | undefined,
+		};
 	}
 }
 
