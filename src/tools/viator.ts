@@ -107,7 +107,7 @@ export class ViatorClient {
 
 		const body: Record<string, unknown> = {
 			filtering,
-			currencyCode: this.currencyCode,
+			currency: this.currencyCode,
 			pagination: { offset: 0, limit: params.count ?? 5 },
 		};
 		if (params.sortBy) {
@@ -135,7 +135,7 @@ export class ViatorClient {
 		const body = {
 			searchQuery: text,
 			searchType: "DESTINATIONS",
-			currencyCode: this.currencyCode,
+			currency: this.currencyCode,
 			pagination: { offset: 0, limit: 5 },
 		};
 		const r = await fetch(`${this.baseUrl}/search/freetext`, {
@@ -177,7 +177,7 @@ export class ViatorClient {
 		const body: Record<string, unknown> = {
 			searchQuery,
 			searchType: "PRODUCTS",
-			currencyCode: this.currencyCode,
+			currency: this.currencyCode,
 			pagination: { offset: 0, limit: opts?.limit ?? 5 },
 		};
 		if (opts?.tags?.length) body.filtering = { tags: opts.tags };
