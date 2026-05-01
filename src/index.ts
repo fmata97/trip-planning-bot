@@ -1,6 +1,6 @@
-import { Bot, webhookCallback } from "grammy";
+import { Bot } from "grammy";
 import type { Context } from "grammy";
-import type { UserFromGetMe } from "grammy/types";
+import type { Update, UserFromGetMe } from "grammy/types";
 import { getAgentByName } from "agents";
 import { TripAgent } from "./agent";
 import { llamaMarkdownToTelegramHTML, formatPollOption } from "./telegram/format";
@@ -60,17 +60,8 @@ async function replyWithAgent(ctx: Context, env: Env, text: string): Promise<voi
 	}
 }
 
-export default {
-	async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
-		if (request.method === "GET") {
-			return new Response("trip-planning-bot is up", { status: 200 });
-		}
-
-		const bot = new Bot(env.TELEGRAM_BOT_TOKEN, { botInfo });
-		if (!botInfo) {
-			await bot.init();
-			botInfo = bot.botInfo;
-		}
+function buildBot(env: Env): Bot {
+	const bot = new Bot(env.TELEGRAM_BOT_TOKEN, { botInfo });
 
 		bot.command("ping", (ctx) => {
 			console.log("cmd=/ping", { chatId: ctx.chat?.id, userId: ctx.from?.id });
@@ -141,6 +132,36 @@ export default {
 			await replyWithAgent(ctx, env, text);
 		});
 
-		return webhookCallback(bot, "cloudflare-mod")(request);
+	return bot;
+}
+
+export default {
+	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+		if (request.method === "GET") {
+			return new Response("trip-planning-bot is up", { status: 200 });
+		}
+
+		const bot = buildBot(env);
+		if (!botInfo) {
+			await bot.init();
+			botInfo = bot.botInfo;
+		}
+
+		// Process the update in the background so we can return 200 to
+		// Telegram immediately. Without this, slow agent.handleMessage calls
+		// (>10s) blow past Telegram's webhook timeout, Telegram retries,
+		// and the user sees split messages or duplicates. waitUntil keeps
+		// the worker alive for up to 30s after the response is sent.
+		try {
+			const update = (await request.json()) as Update;
+			ctx.waitUntil(
+				bot.handleUpdate(update).catch((err) => {
+					console.error("bot.handleUpdate failed", String(err));
+				}),
+			);
+		} catch (err) {
+			console.error("webhook parse failed", String(err));
+		}
+		return new Response("OK");
 	},
 } satisfies ExportedHandler<Env>;
