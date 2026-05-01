@@ -1,5 +1,7 @@
 // Viator Partner API v2 client (Affiliate model — no /bookings/* used).
-// Request shapes follow viator_api_endpoints.md (the local source of truth).
+// Auth pattern based on the public Affiliate Technical Guide. The on-site
+// Viator engineer should confirm the exact header name (`exp-api-key`) and
+// sandbox base URL before we ship the demo.
 
 const DEFAULT_BASE_URL = "https://api.sandbox.viator.com/partner";
 const ACCEPT = "application/json;version=2.0";
@@ -7,7 +9,7 @@ const ACCEPT = "application/json;version=2.0";
 export interface ViatorClientOptions {
 	apiKey: string;
 	baseUrl?: string;
-	currencyCode?: string;
+	currency?: string;
 	language?: string;
 }
 
@@ -21,46 +23,46 @@ export interface ViatorImage {
 	variants?: ViatorImageVariant[];
 }
 
-// Loose typing for fields whose nested shape we still confirm from real
-// responses; we extract via helpers in format.ts.
 export interface ViatorProduct {
 	productCode: string;
 	title: string;
 	description?: string;
 	shortDescription?: string;
-	productUrl?: string;
+	pricing?: {
+		summary?: { fromPrice?: number };
+		currency?: string;
+	};
 	images?: ViatorImage[];
-	duration?: { description?: string; fixedDurationInMinutes?: number };
-	rating?: number;
-	reviewCount?: number;
-	destinationName?: string;
-	recommendedRetailPrice?: unknown;
-	pricing?: unknown;
 	reviews?: { combinedAverageRating?: number; totalReviews?: number };
+	duration?: { description?: string; fixedDurationInMinutes?: number };
+	productUrl?: string;
+	webURL?: string;
 	tags?: number[];
 }
 
 export interface ViatorSearchResponse {
-	products?: ViatorProduct[];
+	products: ViatorProduct[];
 	totalCount?: number;
 }
 
 export interface ViatorDestinationHit {
 	destinationId: number;
 	name: string;
+	type?: string;
+	parentDestinationId?: number;
 }
 
 export class ViatorClient {
 	private apiKey: string;
 	private baseUrl: string;
-	private currencyCode: string;
+	private currency: string;
 	private language: string;
 
 	constructor(opts: ViatorClientOptions) {
 		this.apiKey = opts.apiKey;
 		this.baseUrl = opts.baseUrl ?? DEFAULT_BASE_URL;
-		this.currencyCode = opts.currencyCode ?? "USD";
-		this.language = opts.language ?? "en-US";
+		this.currency = opts.currency ?? "USD";
+		this.language = opts.language ?? "en";
 	}
 
 	private headers(extra: Record<string, string> = {}): HeadersInit {
@@ -73,30 +75,29 @@ export class ViatorClient {
 		};
 	}
 
-	// POST /products/search — structured search after we have a destinationId.
 	async searchProducts(params: {
 		destinationId: number;
 		tags?: number[];
-		priceRangeMax?: number;
-		minRating?: number;
+		startDate?: string; // YYYY-MM-DD
+		endDate?: string; // YYYY-MM-DD
 		count?: number;
-		sortBy?: "PRICE" | "TRAVELER_RATING" | "ITINERARY_DURATION";
-		order?: "ASCENDING" | "DESCENDING";
+		sortOrder?: "DEFAULT" | "PRICE" | "RATING" | "RELEVANCE";
 	}): Promise<ViatorSearchResponse> {
-		const filtering: Record<string, unknown> = {
-			destinationId: params.destinationId,
-		};
-		if (params.tags?.length) filtering.tags = params.tags;
-		if (params.priceRangeMax) filtering.priceRange = { max: params.priceRangeMax };
-		if (params.minRating) filtering.rating = { minRating: params.minRating };
-
 		const body: Record<string, unknown> = {
-			filtering,
-			currencyCode: this.currencyCode,
-			pagination: { offset: 0, limit: params.count ?? 5 },
+			filtering: {
+				destination: String(params.destinationId),
+				...(params.tags?.length ? { tags: params.tags } : {}),
+				...(params.startDate ? { startDate: params.startDate } : {}),
+				...(params.endDate ? { endDate: params.endDate } : {}),
+			},
+			pagination: { start: 1, count: params.count ?? 5 },
+			currency: this.currency,
 		};
-		if (params.sortBy) {
-			body.sorting = { sort: params.sortBy, order: params.order ?? "DESCENDING" };
+		// `sort: DEFAULT` rejects an `order`; only ranked sorts (PRICE, RATING)
+		// take a direction. Omit the whole sorting block to let Viator apply
+		// its default ordering.
+		if (params.sortOrder && params.sortOrder !== "DEFAULT") {
+			body.sorting = { sort: params.sortOrder, order: "DESCENDING" };
 		}
 
 		const r = await fetch(`${this.baseUrl}/products/search`, {
@@ -105,71 +106,8 @@ export class ViatorClient {
 			body: JSON.stringify(body),
 		});
 		if (!r.ok) {
-			throw new ViatorError("products/search", r.status, await r.text());
-		}
-		const json = (await r.json()) as ViatorSearchResponse;
-		console.log("viator.products-search.count", json.products?.length ?? 0);
-		return json;
-	}
-
-	// POST /search/freetext — natural-language fallback or destination resolution.
-	// Returns the top destination hit when used for destination resolution.
-	async resolveDestination(text: string): Promise<ViatorDestinationHit | null> {
-		const body = {
-			searchQuery: text,
-			searchType: "DESTINATIONS",
-			currencyCode: this.currencyCode,
-			pagination: { offset: 0, limit: 5 },
-		};
-		const r = await fetch(`${this.baseUrl}/search/freetext`, {
-			method: "POST",
-			headers: this.headers(),
-			body: JSON.stringify(body),
-		});
-		if (!r.ok) {
-			throw new ViatorError("search/freetext", r.status, await r.text());
-		}
-		const json = (await r.json()) as Record<string, unknown>;
-		console.log("viator.freetext.response", JSON.stringify(json).slice(0, 800));
-
-		// Try the documented shape and a couple of plausible variants.
-		const destinationsField = json.destinations as unknown;
-		const candidates: unknown[] = Array.isArray(destinationsField)
-			? destinationsField
-			: ((destinationsField as { results?: unknown[] } | undefined)?.results ?? []);
-		const top = candidates[0] as Record<string, unknown> | undefined;
-		if (!top) return null;
-
-		const rawId = top.destinationId ?? top.id ?? top.ref;
-		const numericId = typeof rawId === "number" ? rawId : Number(rawId);
-		if (!Number.isFinite(numericId)) {
-			console.log("viator.freetext.no-id-on-top-hit", JSON.stringify(top));
-			return null;
-		}
-		return {
-			destinationId: numericId,
-			name: (top.name as string) ?? (top.destinationName as string) ?? text,
-		};
-	}
-
-	// POST /search/freetext (PRODUCTS) — natural-language product search when
-	// destination/tag IDs aren't yet resolved. Used by the LLM in Phase 2.
-	async freetextProducts(searchQuery: string, opts?: { tags?: number[]; limit?: number }): Promise<ViatorSearchResponse> {
-		const body: Record<string, unknown> = {
-			searchQuery,
-			searchType: "PRODUCTS",
-			currencyCode: this.currencyCode,
-			pagination: { offset: 0, limit: opts?.limit ?? 5 },
-		};
-		if (opts?.tags?.length) body.filtering = { tags: opts.tags };
-
-		const r = await fetch(`${this.baseUrl}/search/freetext`, {
-			method: "POST",
-			headers: this.headers(),
-			body: JSON.stringify(body),
-		});
-		if (!r.ok) {
-			throw new ViatorError("search/freetext", r.status, await r.text());
+			const text = await r.text();
+			throw new ViatorError("products/search", r.status, text);
 		}
 		return (await r.json()) as ViatorSearchResponse;
 	}
@@ -182,6 +120,48 @@ export class ViatorClient {
 			throw new ViatorError(`products/${productCode}`, r.status, await r.text());
 		}
 		return (await r.json()) as ViatorProduct;
+	}
+
+	// Resolves a free-text destination ("Lisbon") into a numeric Viator
+	// destinationId. Returns the top hit, or null if none.
+	async resolveDestination(text: string): Promise<ViatorDestinationHit | null> {
+		const body = {
+			searchTerm: text,
+			searchTypes: [{ searchType: "DESTINATIONS", pagination: { start: 1, count: 5 } }],
+			currency: this.currency,
+		};
+		const r = await fetch(`${this.baseUrl}/search/freetext`, {
+			method: "POST",
+			headers: this.headers(),
+			body: JSON.stringify(body),
+		});
+		if (!r.ok) {
+			throw new ViatorError("search/freetext", r.status, await r.text());
+		}
+		const json = (await r.json()) as Record<string, unknown>;
+		// Log a trimmed payload so we can see the actual shape in `wrangler tail`.
+		console.log("viator.freetext.response", JSON.stringify(json).slice(0, 800));
+
+		// Viator's response shape can vary; try a few known-plausible paths.
+		const destinationsField = json.destinations as unknown;
+		const candidates: unknown[] = Array.isArray(destinationsField)
+			? destinationsField
+			: ((destinationsField as { results?: unknown[] } | undefined)?.results ?? []);
+		const top = candidates[0] as Record<string, unknown> | undefined;
+		if (!top) return null;
+
+		const rawId = top.destinationId ?? top.id ?? top.ref ?? top.destinationRef;
+		const numericId = typeof rawId === "number" ? rawId : Number(rawId);
+		if (!Number.isFinite(numericId)) {
+			console.log("viator.freetext.no-id-on-top-hit", JSON.stringify(top));
+			return null;
+		}
+		return {
+			destinationId: numericId,
+			name: (top.name as string) ?? (top.destinationName as string) ?? text,
+			type: top.type as string | undefined,
+			parentDestinationId: top.parentDestinationId as number | undefined,
+		};
 	}
 }
 
