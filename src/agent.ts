@@ -60,9 +60,11 @@ export interface VoteCounts {
 }
 
 const HISTORY_CAP = 30;
-// Workers AI Llama 4 Scout 17B Instruct — the model used in Cloudflare's own
-// AIChatAgent example, with native tool-calling support on the platform.
-const MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct";
+// Workers AI Gemma 4 26B A4B Instruct — Mixture-of-Experts (26B total / 4B
+// active), released April 2026 on Workers AI, with native tool-calling
+// support. Stronger at multi-step reasoning and instruction following than
+// Llama 4 Scout 17B for our agentic flow.
+const MODEL = "@cf/google/gemma-4-26b-a4b-it";
 
 // One TripAgent instance per Telegram group chat (named `chat-<chat_id>`).
 // Per-chat state (history, current trip, candidate activities, votes) is
