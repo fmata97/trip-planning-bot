@@ -6,7 +6,16 @@ const PARAM = "pid";
 
 export function decorateAffiliateUrl(rawUrl: string | undefined, affiliateId: string | undefined): string | undefined {
 	if (!rawUrl) return undefined;
-	if (!affiliateId) return rawUrl;
-	const sep = rawUrl.includes("?") ? "&" : "?";
-	return `${rawUrl}${sep}${PARAM}=${encodeURIComponent(affiliateId)}`;
+
+	// Viator's productUrl ships with `pid=` as a placeholder for the partner
+	// to fill in. Strip it (and any neighbouring '&') so we either leave a
+	// clean URL or replace it with the real affiliate ID below.
+	let cleaned = rawUrl
+		.replace(new RegExp(`([?&])${PARAM}=(?=$|&|#)`, "g"), "$1") // `?pid=&foo` → `?&foo`, `?pid=` → `?`
+		.replace(/[?&]+(?=$|#)/g, "") // strip dangling `?` or `&` at end
+		.replace(/([?&])&+/g, "$1"); // collapse `?&` into `?`
+
+	if (!affiliateId) return cleaned;
+	const sep = cleaned.includes("?") ? "&" : "?";
+	return `${cleaned}${sep}${PARAM}=${encodeURIComponent(affiliateId)}`;
 }
