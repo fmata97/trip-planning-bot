@@ -54,6 +54,10 @@ export class TripAgent extends Agent<Env, TripState> {
 				messages: history,
 				tools: buildTools(this.env, this),
 				stopWhen: stepCountIs(6),
+				// Workers AI defaults to ~256 max output tokens, which truncates
+				// our 3-5 activity replies mid-sentence. 1024 covers a verbose
+				// reply plus the appended booking-links section.
+				maxOutputTokens: 1024,
 				onStepFinish: ({ text, toolCalls, toolResults, finishReason }) => {
 					console.log("agent.step", {
 						finishReason,
