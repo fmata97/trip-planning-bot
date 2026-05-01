@@ -21,13 +21,31 @@ export interface CandidateProduct {
 	priceFrom?: number;
 	currency?: string;
 	rating?: number;
+	imageUrl?: string;
 }
+
+// Votes are keyed by `${productCode}:up` / `${productCode}:down`. Values are
+// arrays of user IDs (stringified). Lets us answer per-product tallies and
+// per-user "have I already voted" without extra plumbing.
+export type VoteMap = Record<string, string[]>;
 
 export interface TripState {
 	messages: Array<{ role: "user" | "assistant"; content: string }>;
 	trip: TripDetails;
 	candidates: CandidateProduct[];
-	votes: Record<string, string[]>;
+	votes: VoteMap;
+}
+
+export interface AgentReply {
+	text: string;
+	// New cards to render this turn, in arrival order. Empty when the turn
+	// didn't trigger a search (e.g. user just chatted).
+	cards: CandidateProduct[];
+}
+
+export interface VoteCounts {
+	up: number;
+	down: number;
 }
 
 const HISTORY_CAP = 30;
@@ -42,7 +60,14 @@ const MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct";
 export class TripAgent extends Agent<Env, TripState> {
 	initialState: TripState = { messages: [], trip: {}, candidates: [], votes: {} };
 
-	async handleMessage(text: string, _userId: number): Promise<string> {
+	// Set by the searchActivities tool during the LLM tool loop. Read by
+	// handleMessage at the end of the turn so the worker knows which
+	// candidates to render as separate Telegram cards with vote buttons.
+	// Reset at the start of every turn — instance state, not persisted.
+	proposedThisTurn: CandidateProduct[] = [];
+
+	async handleMessage(text: string, _userId: number): Promise<AgentReply> {
+		this.proposedThisTurn = [];
 		const userMsg: ModelMessage = { role: "user", content: text };
 		const history: ModelMessage[] = [...this.state.messages, userMsg];
 
@@ -111,10 +136,86 @@ export class TripAgent extends Agent<Env, TripState> {
 			];
 			this.setState({ ...this.state, messages: trimmed });
 
-			return finalReply;
+			return { text: finalReply, cards: this.proposedThisTurn };
 		} catch (err) {
 			console.error("agent.handleMessage failed", err);
-			return "Hit an internal error reasoning about that. Try again in a moment.";
+			return { text: "Hit an internal error reasoning about that. Try again in a moment.", cards: [] };
 		}
+	}
+
+	// Toggleable vote: same user pressing the same kind clears their vote;
+	// pressing the opposite kind moves their vote. Returns the new tally.
+	async vote(productCode: string, userId: string, kind: "up" | "down"): Promise<VoteCounts> {
+		const upKey = `${productCode}:up`;
+		const downKey = `${productCode}:down`;
+		const upSet = new Set(this.state.votes[upKey] ?? []);
+		const downSet = new Set(this.state.votes[downKey] ?? []);
+
+		if (kind === "up") {
+			if (upSet.has(userId)) upSet.delete(userId);
+			else {
+				upSet.add(userId);
+				downSet.delete(userId);
+			}
+		} else {
+			if (downSet.has(userId)) downSet.delete(userId);
+			else {
+				downSet.add(userId);
+				upSet.delete(userId);
+			}
+		}
+
+		const nextVotes: VoteMap = { ...this.state.votes, [upKey]: [...upSet], [downKey]: [...downSet] };
+		this.setState({ ...this.state, votes: nextVotes });
+		return { up: upSet.size, down: downSet.size };
+	}
+
+	getVoteCounts(productCode: string): VoteCounts {
+		return {
+			up: (this.state.votes[`${productCode}:up`] ?? []).length,
+			down: (this.state.votes[`${productCode}:down`] ?? []).length,
+		};
+	}
+
+	// Produces the /finalize summary: top-voted candidates with totals.
+	async finalize(): Promise<{ text: string }> {
+		const candidates = this.state.candidates;
+		if (candidates.length === 0) {
+			return { text: "No candidates yet — search for activities first with /plan." };
+		}
+
+		const tallied = candidates.map((c) => {
+			const counts = this.getVoteCounts(c.productCode);
+			return { ...c, ...counts, score: counts.up - counts.down };
+		});
+
+		const top = tallied
+			.filter((t) => t.score > 0)
+			.sort((a, b) => b.score - a.score || (b.rating ?? 0) - (a.rating ?? 0))
+			.slice(0, 5);
+
+		if (top.length === 0) {
+			return {
+				text: "Nobody has voted 👍 on any activities yet. Vote on some cards above and run /finalize again.",
+			};
+		}
+
+		const lines = top.map((t, i) => {
+			const meta: string[] = [];
+			if (typeof t.priceFrom === "number") meta.push(`from ${t.currency ?? "USD"} ${t.priceFrom.toFixed(0)}`);
+			meta.push(`${t.up}👍 ${t.down}👎`);
+			const link = t.productUrl ? ` — [Book on Viator](${t.productUrl})` : "";
+			return `${i + 1}. **${t.title}** — ${meta.join(", ")}${link}`;
+		});
+
+		const totalLow = top.reduce((sum, t) => sum + (t.priceFrom ?? 0), 0);
+		const currency = top[0]?.currency ?? "USD";
+		const trip = this.state.trip;
+		const travelers = trip.travelers ?? 1;
+		const totalGroup = totalLow * travelers;
+
+		const header = trip.destination ? `**Top picks for ${trip.destination}**` : "**Top picks**";
+		const footer = `\nPer-person from ~${currency} ${totalLow.toFixed(0)}${travelers > 1 ? ` · group of ${travelers} from ~${currency} ${totalGroup.toFixed(0)}` : ""}`;
+		return { text: `${header}\n\n${lines.join("\n")}\n${footer}` };
 	}
 }

@@ -1,8 +1,17 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { ViatorClient, ViatorError } from "./viator";
+import { ViatorClient, ViatorError, type ViatorImage } from "./viator";
 import { decorateAffiliateUrl } from "../affiliate";
 import type { TripAgent, TripState, CandidateProduct } from "../agent";
+
+// Pick a Telegram-friendly image variant (400-800px wide). Telegram's
+// sendPhoto wants width >= 320 to look good in chat.
+function pickImageUrl(images?: ViatorImage[]): string | undefined {
+	const variants = images?.[0]?.variants ?? [];
+	const sorted = [...variants].sort((a, b) => (a.width ?? 0) - (b.width ?? 0));
+	const ideal = sorted.find((v) => (v.width ?? 0) >= 400 && (v.width ?? 0) <= 800);
+	return (ideal ?? sorted[sorted.length - 1] ?? variants[0])?.url;
+}
 
 // Tools surfaced to the Workers AI Llama for tool-calling. Keeping the
 // surface small and the parameters tight helps Llama choose the right tool
@@ -14,6 +23,7 @@ export function buildTools(env: Env, agent: TripAgent) {
 		productCode: string;
 		title: string;
 		shortDescription?: string;
+		description?: string;
 		productUrl?: string;
 		duration?: { description?: string };
 		pricing?: { summary?: { fromPrice?: number }; currency?: string };
@@ -21,6 +31,7 @@ export function buildTools(env: Env, agent: TripAgent) {
 		reviews?: { combinedAverageRating?: number; totalReviews?: number };
 		rating?: number;
 		reviewCount?: number;
+		images?: ViatorImage[];
 	}) {
 		const rrp = p.recommendedRetailPrice as { fromPrice?: number; amount?: number; currency?: string } | undefined;
 		const priceFrom = rrp?.fromPrice ?? rrp?.amount ?? p.pricing?.summary?.fromPrice;
@@ -55,6 +66,7 @@ export function buildTools(env: Env, agent: TripAgent) {
 			reviewCount,
 			bookUrl,
 			markdownLine,
+			imageUrl: pickImageUrl(p.images),
 		};
 	}
 
@@ -84,13 +96,21 @@ export function buildTools(env: Env, agent: TripAgent) {
 						priceFrom: s.priceFrom,
 						currency: s.currency,
 						rating: s.rating,
+						imageUrl: s.imageUrl,
 					}));
+					// Append (don't replace) so multi-search turns end up with all
+					// candidates available to vote on, then dedupe by productCode.
+					const seen = new Set(agent.state.candidates.map((c) => c.productCode));
+					const fresh = candidates.filter((c) => !seen.has(c.productCode));
+					const merged = [...agent.state.candidates, ...fresh];
 					const nextState: TripState = {
 						...agent.state,
 						trip: { ...agent.state.trip, destination: dest.name, destinationId: dest.destinationId },
-						candidates,
+						candidates: merged,
 					};
 					agent.setState(nextState);
+					// Tell the worker which cards to render this turn.
+					agent.proposedThisTurn = [...agent.proposedThisTurn, ...fresh];
 					return { destination: dest.name, count: summarised.length, products: summarised };
 				} catch (err) {
 					if (err instanceof ViatorError) {

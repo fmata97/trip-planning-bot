@@ -1,7 +1,43 @@
 import type { Context, InlineKeyboard } from "grammy";
 import { InlineKeyboard as Keyboard } from "grammy";
 import type { ViatorProduct } from "../tools/viator";
+import type { CandidateProduct, VoteCounts } from "../agent";
 import { decorateAffiliateUrl } from "../affiliate";
+
+// Inline keyboard for a single activity card. Encodes the productCode in
+// the callback_data so the vote handler can look up which item was voted on.
+// Telegram caps callback_data at 64 bytes; "v:<code>:up" is comfortably under.
+export function buildVoteKeyboard(c: CandidateProduct, counts: VoteCounts): Keyboard {
+	const kb = new Keyboard()
+		.text(`👍 ${counts.up}`, `v:${c.productCode}:up`)
+		.text(`👎 ${counts.down}`, `v:${c.productCode}:down`);
+	if (c.productUrl) kb.row().url("🔗 View on Viator", c.productUrl);
+	return kb;
+}
+
+function htmlEscapeForCard(s: string): string {
+	return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function formatCandidateCaption(c: CandidateProduct): string {
+	const title = htmlEscapeForCard(c.title);
+	const meta: string[] = [];
+	if (typeof c.priceFrom === "number") meta.push(`from ${c.currency ?? "USD"} ${c.priceFrom.toFixed(0)}`);
+	if (typeof c.rating === "number") meta.push(`⭐ ${c.rating.toFixed(1)}`);
+	const metaLine = meta.length ? `<i>${htmlEscapeForCard(meta.join(" · "))}</i>` : "";
+	const desc = c.shortDescription ? htmlEscapeForCard(c.shortDescription).slice(0, 600) : "";
+	return [`<b>${title}</b>`, metaLine, desc].filter(Boolean).join("\n").slice(0, 1024);
+}
+
+export async function sendCandidateCard(ctx: Context, c: CandidateProduct, counts: VoteCounts): Promise<void> {
+	const caption = formatCandidateCaption(c);
+	const reply_markup = buildVoteKeyboard(c, counts);
+	if (c.imageUrl) {
+		await ctx.replyWithPhoto(c.imageUrl, { caption, parse_mode: "HTML", reply_markup });
+	} else {
+		await ctx.reply(caption, { parse_mode: "HTML", reply_markup, link_preview_options: { is_disabled: true } });
+	}
+}
 
 // Pick a reasonably-sized image (Telegram sendPhoto wants ≤10MB and prefers
 // width ≥400). Viator often returns multiple variants per image; we grab one
