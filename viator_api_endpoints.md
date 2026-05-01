@@ -1,35 +1,38 @@
-# Viator Partner API Reference for This Bot
+# Viator Sandbox API Contract for This Bot
 
 Last reviewed: 2026-05-01
 
-This file is the local source of truth for LLMs implementing Viator API calls in this repository. It is scoped to a budget trip-planning bot running on Cloudflare Workers/Agents.
+This file is the local source of truth for LLMs implementing Viator calls in this repository. It is scoped to a Cloudflare Workers Telegram trip-planning bot and must only describe the Viator sandbox API path used by this project.
 
-Official references:
+## LLM Operating Contract
 
-- Viator Partner API v2 technical docs: https://docs.viator.com/partner-api/technical/
-- Viator Partner API docs home: https://docs.viator.com/partner-api/
-
-## Non-Negotiable Rules
-
-- Use Viator Partner API v2 only.
+- Use only the Viator sandbox base URL: `https://api.sandbox.viator.com/partner`.
+- Set `VIATOR_BASE_URL` to the sandbox base URL above.
+- Build every Viator request from `VIATOR_BASE_URL` and an allowed path in this file.
 - Never expose `VIATOR_API_KEY` to Telegram users, logs, client code, or error text.
-- Use `recommendedRetailPrice` for user-facing prices. Viator notes that RRP can be lower than partner total cost on low-margin products.
-- Do not present a final quote from search or schedule data. Call `/availability/check` for the selected date, start time, option, currency, and traveler mix first.
-- Do not use `/products/{product-code}` for catalog ingestion. Use it only when the user selects a product.
-- Keep booking endpoints out of scope unless the user explicitly asks to implement booking and the partner account has booking access.
-- Treat schedules as stale hints. Availability can change; real-time checks are authoritative.
-- Preserve `productUrl` when linking users to Viator so attribution/campaign tracking remains intact.
+- Use Viator Partner API v2 headers on every request.
+- Treat LLM output as untrusted. Validate intent, destination, dates, currency, traveler mix, and product selections before calling Viator.
+- Do not invent product codes, destination IDs, tags, prices, product options, start times, or availability.
+- Do not present a final available price from search or schedule data. Call `/availability/check` first.
+- Use `/products/{product-code}` only when the user selects a product or asks for details.
+- Preserve `productUrl` for user-facing booking links and attribution.
+- Keep booking operations out of scope for this bot.
 
-## Environment
+## Sandbox Base URL
 
-| Environment | Base URL |
-| --- | --- |
-| Production | `https://api.viator.com/partner` |
-| Sandbox | `https://api.sandbox.viator.com/partner` |
+```text
+https://api.sandbox.viator.com/partner
+```
 
-Use an environment variable for the base URL so local and production deployments can switch without code changes.
+Construct URLs by appending one of the allowed paths in this file to `VIATOR_BASE_URL`.
 
-Required request headers:
+Example:
+
+```text
+https://api.sandbox.viator.com/partner/products/search
+```
+
+## Required Headers
 
 | Header | Value |
 | --- | --- |
@@ -37,35 +40,42 @@ Required request headers:
 | `Accept` | `application/json;version=2.0` |
 | `Accept-Language` | User preference, default `en-US` |
 | `Content-Type` | `application/json` for POST requests |
+| `Accept-Encoding` | `gzip` when supported |
 
-Operational defaults:
+## Runtime Defaults
 
-- Timeout: use a long API timeout, up to 120 seconds for slow supplier-backed calls.
+- Timeout: allow long upstream calls, up to 120 seconds.
 - Retries: retry `429` and transient `5xx` with exponential backoff and jitter.
-- Rate limits: Viator applies per-endpoint/per-partner limits and additional IP-based security limiting. Do not fan out blindly from one chat message.
+- Rate limits: do not fan out many Viator calls from one Telegram message.
+- Errors: throw or return sanitized errors. Never include raw upstream response bodies in user-facing text.
+- Internal logging: include endpoint, status, retryability, and `X-Unique-ID` response header when present.
 
-## Endpoint Map
+## Allowed Sandbox Endpoints
 
-| Endpoint | Method | Use in this bot | Cache |
+Use only these Viator paths from the sandbox base URL:
+
+| Endpoint | Method | Bot use | Cache |
 | --- | --- | --- | --- |
-| `/search/freetext` | POST | Natural-language search and lightweight destination/product discovery | No, or short per query |
-| `/products/search` | POST | Structured budget search after resolving destination/tags | No, or short per query |
+| `/search/freetext` | POST | Natural-language search and loose discovery | Short per query or none |
+| `/products/search` | POST | Structured search after resolving destination, budget, tags, rating, or duration | Short per query or none |
 | `/destinations` | GET | Destination name to ID lookup | Weekly plus on-demand misses |
-| `/attractions/search` | POST | Landmark/POI search | Weekly for known data, no cache for ad hoc queries |
-| `/products/{product-code}` | GET | Details after user selects a result | Short product cache |
-| `/availability/schedules/{product-code}` | GET | Calendar hints and possible dates | Short cache; do not quote from it |
-| `/availability/check` | POST | Live availability and final price | Never cache as final truth |
-| `/products/tags` | GET | Map activity categories to tag IDs | Weekly plus on-demand misses |
-| `/exchange-rates` | POST | Currency conversion if needed | Until response expiry, otherwise daily |
-| `/reviews/product` | POST | Reviews for "is this worth it?" style questions | Weekly; requires Full Affiliate or higher |
+| `/attractions/search` | POST | Landmark or point-of-interest search | Weekly for known data, none for ad hoc queries |
+| `/attractions/{attraction-id}` | GET | Single attraction details after user selection | Short cache |
+| `/products/{product-code}` | GET | Product details after user selection | Short cache |
+| `/products/tags` | GET | Activity category to tag ID lookup | Weekly plus on-demand misses |
+| `/availability/schedules/{product-code}` | GET | Date and start-time hints; never final quote source | Short cache |
+| `/availability/check` | POST | Live availability and final available price | Never cache as final truth |
+| `/locations/bulk` | POST | Resolve location reference codes from product itineraries | Short cache by ref |
+| `/exchange-rates` | POST | Currency conversion when needed | Until expiry, otherwise daily |
+| `/reviews/product` | POST | Review summaries for selected products when available | Weekly |
+
+If a sandbox endpoint returns `401`, `403`, or a feature/access error, handle it as unavailable for this bot and continue with a user-safe fallback.
 
 ## 1. Free-Text Search
 
 `POST /search/freetext`
 
-Use this for user text like "cheap food tours in Lisbon" or "things to do in Tokyo under 30 GBP" when the bot has not yet resolved destination IDs or tag IDs.
-
-Example:
+Use for loose user text such as "cheap food tours in Lisbon" when destination IDs or tag IDs are not resolved yet.
 
 ```json
 {
@@ -82,19 +92,17 @@ Example:
 }
 ```
 
-Notes for LLM implementers:
+Rules:
 
-- `searchType` can target products, destinations, or attractions depending on the interaction.
-- Tag filtering for `searchType: "PRODUCTS"` is supported in the current v2 docs.
-- Use this as the fallback when structured search inputs are incomplete.
+- `searchType` may be `PRODUCTS`, `DESTINATIONS`, or `ATTRACTIONS`.
+- Use `PRODUCTS` for tour/activity discovery.
+- Use this as fallback when structured inputs are incomplete.
 
 ## 2. Product Search
 
 `POST /products/search`
 
-Use this when the bot has a `destinationId`, budget, tags, rating, duration, or sorting requirements.
-
-Example:
+Use when the bot has structured search inputs such as `destinationId`, budget, tags, rating, duration, sort order, or currency.
 
 ```json
 {
@@ -125,13 +133,7 @@ Example:
 }
 ```
 
-Use for:
-
-- "Tours in Paris under $30"
-- "Best rated food activities in Rome"
-- "Outdoor activities in Bali below 50 EUR"
-
-Product cards should normalize to:
+Normalize result cards to this shape:
 
 ```ts
 type ProductCard = {
@@ -150,26 +152,26 @@ type ProductCard = {
 };
 ```
 
+Use `recommendedRetailPrice` for "from" prices, but do not treat it as a final available quote.
+
 ## 3. Destinations
 
 `GET /destinations`
 
-Use this to build a lookup from user-facing names to Viator destination IDs.
+Use to resolve user-facing destination names to Viator destination IDs.
 
-Implementation guidance:
+Rules:
 
 - Cache destination names in SQLite or Agent state.
-- Store lowercased aliases, but keep display names intact.
-- If a destination is ambiguous, ask the user to choose rather than guessing.
-- Refresh weekly, and refresh on demand when a product references an unknown destination ID.
+- Store lowercased aliases for matching and preserve display names for output.
+- Ask the user to choose when a destination is ambiguous.
+- Refresh weekly and on demand when product data references an unknown destination ID.
 
 ## 4. Attractions
 
 `POST /attractions/search`
 
-Use this for landmarks or points of interest like "Eiffel Tower", "Colosseum", or "Sagrada Familia".
-
-Example:
+Use for landmarks or points of interest such as "Eiffel Tower", "Colosseum", or "Sagrada Familia".
 
 ```json
 {
@@ -178,41 +180,43 @@ Example:
 }
 ```
 
-Use attraction results to refine the follow-up product search. If multiple attractions match, present concise choices.
+`GET /attractions/{attraction-id}`
+
+Retrieve details for one attraction after the user selects it.
+
+Rules:
+
+- Use attraction results to refine product search.
+- If multiple attractions match, present concise choices.
 
 ## 5. Product Details
 
 `GET /products/{product-code}`
 
-Call this only when the user selects a product or asks for more detail.
+Call only after the user selects a product or asks for details.
 
-Important response areas:
+Important fields:
 
 - `title`, descriptions, itinerary, inclusions, exclusions, accessibility, cancellation policy.
 - `pricingInfo.type`: `PER_PERSON` or `UNIT`.
-- `pricingInfo.ageBands`: age bands such as `ADULT`, `CHILD`, `YOUTH`, `SENIOR`, `INFANT`, `TRAVELER`.
-- `productOptions`: option/tour-grade values; preserve `productOptionCode` for availability checks.
-- `bookingQuestions`: required only if booking is implemented later.
-- `productUrl`: use this for "book on Viator" links.
+- `pricingInfo.ageBands`: `ADULT`, `CHILD`, `YOUTH`, `SENIOR`, `INFANT`, or `TRAVELER`.
+- `productOptions`: preserve `productOptionCode` for availability checks.
+- `productUrl`: use for the final booking link.
+- `bookingQuestions`: ignore unless booking is explicitly added later.
+- `viatorUniqueContent`: do not store in searchable indexes or public page source.
 
-Do not paste very long descriptions into Telegram. Summarize and keep key terms/cancellation details visible.
+Keep Telegram detail messages concise. Summarize long descriptions and keep cancellation and key terms visible.
 
 ## 6. Availability Schedules
 
 `GET /availability/schedules/{product-code}`
 
-Use schedules to propose date/start-time choices, not to finalize price.
+Use schedules to propose candidate dates and start times. Do not quote final availability or final price from schedules.
 
-Important model:
-
-- Schedules describe seasons and days of week.
-- They list unavailable dates rather than enumerating all available dates.
-- Product options and unit/per-person pricing may affect which dates/times are valid.
-
-Safe interpretation flow:
+Safe flow:
 
 1. Read seasons for the selected `productCode` and `productOptionCode`.
-2. Generate candidate dates in the relevant date range.
+2. Generate candidate dates in the relevant user date range.
 3. Keep dates whose day of week is allowed.
 4. Remove dates listed in `unavailableDates`.
 5. Show a small set of candidates.
@@ -222,9 +226,7 @@ Safe interpretation flow:
 
 `POST /availability/check`
 
-Call this before giving a final price or saying a tour is available.
-
-Example:
+Call before saying a tour is available or showing a final available price.
 
 ```json
 {
@@ -240,12 +242,14 @@ Example:
 }
 ```
 
-Notes:
+Rules:
 
-- Include `productOptionCode` when a product has options.
-- Build `paxMix` from the conversation, defaulting only after confirming assumptions with the user.
-- Handle rejected/unavailable results by offering the next viable dates or start times.
-- Surface extra charges when present; do not hide mandatory costs.
+- The currency field is `currency`, not `currencyCode`.
+- Include `productOptionCode` when the product has options.
+- Build `paxMix` from the conversation and validate age bands against product details.
+- If the user did not provide traveler mix, ask or use an explicit confirmed default.
+- If unavailable, offer the next viable dates or start times from schedules.
+- Surface mandatory costs and extra charges when present.
 
 ## 8. Product Tags
 
@@ -261,19 +265,17 @@ Examples:
 - Day trips
 - Transfers and transportation
 
-Implementation guidance:
+Rules:
 
 - Cache tags weekly.
-- Keep a small curated synonym map in code or SQLite, for example `food tour -> food and drink`.
-- If the LLM suggests a tag name not in cache, search tags by normalized text before falling back to free-text search.
+- Keep a small curated synonym map, for example `food tour -> food and drink`.
+- If the LLM suggests a tag name not in cache, search cached tags by normalized text before falling back to free-text search.
 
 ## 9. Exchange Rates
 
 `POST /exchange-rates`
 
-Use when product/search currency cannot be requested directly or when converting cached values.
-
-Example:
+Use only when a search or check endpoint cannot directly return the user's requested currency, or when converting cached values.
 
 ```json
 {
@@ -282,69 +284,72 @@ Example:
 }
 ```
 
-Guidance:
+Rules:
 
-- Prefer asking Viator search/check endpoints for the user's desired `currencyCode`/`currency` when supported.
-- Cache rates until the response expiry. If no expiry is available in a wrapper type, refresh daily.
-- Label converted prices clearly if they are not directly returned by Viator.
+- Prefer asking search/check endpoints for the user's desired `currencyCode` or `currency`.
+- Cache rates until the response expiry. If no expiry is available, refresh daily.
+- Label converted prices clearly when they are not directly returned by Viator.
 
 ## 10. Product Reviews
 
 `POST /reviews/product`
 
-Use only when the partner account has Full Affiliate access or higher.
+Use only for a selected product when review data is available from sandbox.
 
 Rules:
 
-- Basic-access Affiliate partners do not have this endpoint.
-- Review text is protected content and must not be indexed by search engines.
-- In this Telegram bot, review text may be displayed inside the chat interface, but do not add it to public pages or searchable indexes.
-- Rate-limit review refreshes; Viator requests conservative use of this endpoint.
+- If sandbox rejects the endpoint, continue without reviews.
+- Do not index review text or forward it outside the Telegram chat.
+- Rate-limit review refreshes.
 
-## Pricing Models
+## 11. Location Resolution
+
+`POST /locations/bulk`
+
+Use to resolve itinerary location reference codes into human-readable names and addresses.
+
+```json
+{
+  "locations": [
+    { "provider": "TRIPADVISOR", "ref": "tri-123456" }
+  ]
+}
+```
+
+Rules:
+
+- Batch multiple refs in one request.
+- Cache by provider and ref.
+- Use resolved locations for itinerary summaries.
+
+## Pricing Rules
 
 | Model | How to calculate |
 | --- | --- |
 | `PER_PERSON` | Sum each age-band price multiplied by traveler count |
 | `UNIT` | Multiply unit price by required units, respecting unit type and group limits |
 
-Unit types can include `GROUP`, `ROOM`, `PACKAGE`, `VEHICLE`, `BIKE`, `BOAT`, and `AIRCRAFT`.
-
-For quotes, prefer the total returned from `/availability/check` over local calculations.
+For final quotes, prefer the total returned from `/availability/check` over local calculations. User-facing final prices must be based on live availability data, not search data.
 
 ## Recommended Bot Flow
 
 ```text
 Telegram message
-  -> LLM extracts intent, destination, budget, dates, travelers, currency
-  -> resolve destination/tag from cache
-  -> /products/search when structured inputs are available
-  -> /search/freetext when inputs are loose
+  -> validate chat ID and user text
+  -> LLM extracts intent, destination, budget, dates, travelers, and currency
+  -> validate extracted intent JSON
+  -> resolve destination and tags from cache
+  -> call /products/search when structured inputs are available
+  -> call /search/freetext when inputs are loose
   -> show 3 to 5 product cards
-  -> user selects product
-  -> /products/{product-code}
-  -> user selects option/date/travelers
-  -> /availability/schedules/{product-code} for candidate slots
-  -> /availability/check for live price
-  -> show final quote and Viator productUrl
+  -> user selects a product
+  -> call /products/{product-code}
+  -> call /locations/bulk for itinerary location refs when needed
+  -> ask for missing option/date/traveler details
+  -> call /availability/schedules/{product-code} for candidate slots
+  -> call /availability/check for live availability and final price
+  -> show final quote and productUrl
 ```
-
-## Access by Partner Type
-
-| Endpoint | Basic Affiliate | Full Affiliate | Booking Affiliate | Merchant |
-| --- | :---: | :---: | :---: | :---: |
-| `/search/freetext` | yes | yes | yes | yes |
-| `/products/search` | yes | yes | yes | yes |
-| `/destinations` | yes | yes | yes | yes |
-| `/attractions/search` | yes | yes | yes | yes |
-| `/products/{product-code}` | yes | yes | yes | yes |
-| `/products/tags` | yes | yes | yes | yes |
-| `/availability/schedules/{product-code}` | yes | yes | yes | yes |
-| `/availability/check` | yes | yes | yes | yes |
-| `/exchange-rates` | yes | yes | yes | yes |
-| `/reviews/product` | no | yes | yes | yes |
-| `/bookings/cart/book` | no | no | yes | yes |
-| `/bookings/book` | no | no | no | yes |
 
 ## Error Handling Contract
 
@@ -361,4 +366,11 @@ type ApiError = {
 };
 ```
 
-Use `X-Unique-ID` from Viator response headers in internal logs for support, but do not show raw upstream bodies to users.
+Error rules:
+
+- `401` or `403`: treat as unavailable credentials/access for the current sandbox configuration.
+- `404`: treat the selected resource as missing or stale.
+- `409` or validation errors: ask the user to adjust date, option, currency, or traveler mix.
+- `429`: retry with backoff when safe, then ask the user to try again later.
+- `5xx`: retry transient failures, then provide a short user-safe failure message.
+- Never show raw upstream bodies, secrets, stack traces, or internal request payloads to Telegram users.
