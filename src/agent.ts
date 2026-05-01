@@ -31,9 +31,9 @@ export interface TripState {
 }
 
 const HISTORY_CAP = 30;
-// Llama 3.3 70B Instruct on Workers AI — best tool-calling on the platform
-// per Cloudflare's own examples. Falls back gracefully on tool errors.
-const MODEL = "@cf/meta/llama-3.3-70b-instruct";
+// Workers AI Llama 4 Scout 17B Instruct — the model used in Cloudflare's own
+// AIChatAgent example, with native tool-calling support on the platform.
+const MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct";
 
 // One TripAgent instance per Telegram group chat (named `chat-<chat_id>`).
 // Per-chat state (history, current trip, candidate activities, votes) is
