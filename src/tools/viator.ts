@@ -120,7 +120,9 @@ export class ViatorClient {
 			body: JSON.stringify(body),
 		});
 		if (!r.ok) {
-			throw new ViatorError("products/search", r.status, await r.text());
+			const errBody = await r.text();
+			console.log("viator.error", { endpoint: "products/search", status: r.status, body: errBody.slice(0, 600) });
+			throw new ViatorError("products/search", r.status, errBody);
 		}
 		const json = (await r.json()) as ViatorSearchResponse;
 		console.log("viator.products-search.count", json.products?.length ?? 0);
@@ -142,7 +144,9 @@ export class ViatorClient {
 			body: JSON.stringify(body),
 		});
 		if (!r.ok) {
-			throw new ViatorError("search/freetext", r.status, await r.text());
+			const errBody = await r.text();
+			console.log("viator.error", { endpoint: "search/freetext", op: "DESTINATIONS", status: r.status, body: errBody.slice(0, 600) });
+			throw new ViatorError("search/freetext", r.status, errBody);
 		}
 		const json = (await r.json()) as Record<string, unknown>;
 		console.log("viator.freetext.destinations", JSON.stringify(json).slice(0, 600));
@@ -184,7 +188,9 @@ export class ViatorClient {
 			body: JSON.stringify(body),
 		});
 		if (!r.ok) {
-			throw new ViatorError("search/freetext", r.status, await r.text());
+			const errBody = await r.text();
+			console.log("viator.error", { endpoint: "search/freetext", op: "PRODUCTS", status: r.status, body: errBody.slice(0, 600) });
+			throw new ViatorError("search/freetext", r.status, errBody);
 		}
 		return (await r.json()) as ViatorSearchResponse;
 	}
