@@ -98,15 +98,23 @@ export function buildTools(env: Env, agent: TripAgent) {
 						rating: s.rating,
 						imageUrl: s.imageUrl,
 					}));
-					// Append (don't replace) so multi-search turns end up with all
-					// candidates available to vote on, then dedupe by productCode.
-					const seen = new Set(agent.state.candidates.map((c) => c.productCode));
+					// Reset the shortlist when the user pivots to a different
+					// destination — keeps Lisbon and Porto cards from mixing
+					// in the same /finalize tally. Multi-themed searches for
+					// the SAME destination keep accumulating, deduped by code.
+					const prevDestinationId = agent.state.trip.destinationId;
+					const destinationChanged =
+						prevDestinationId !== undefined && prevDestinationId !== dest.destinationId;
+					const baseCandidates = destinationChanged ? [] : agent.state.candidates;
+					const baseVotes = destinationChanged ? {} : agent.state.votes;
+					const seen = new Set(baseCandidates.map((c) => c.productCode));
 					const fresh = candidates.filter((c) => !seen.has(c.productCode));
-					const merged = [...agent.state.candidates, ...fresh];
+					const merged = [...baseCandidates, ...fresh];
 					const nextState: TripState = {
 						...agent.state,
 						trip: { ...agent.state.trip, destination: dest.name, destinationId: dest.destinationId },
 						candidates: merged,
+						votes: baseVotes,
 					};
 					agent.setState(nextState);
 					// Tell the worker which cards to render this turn.

@@ -109,14 +109,15 @@ export class TripAgent extends Agent<Env, TripState> {
 			const replyText = result.text?.trim() || "Hmm — I couldn't put a reply together. Try rephrasing?";
 
 			// Belt and suspenders: if the model talked about activities but
-			// omitted the booking links (Llama 4 Scout often does), append
-			// a "Booking links" section pulled from the candidates the
-			// search tool just persisted into state.
-			const candidates = this.state.candidates ?? [];
+			// omitted the booking links, append a "Booking links" section.
+			// Only use candidates proposed THIS turn — using all-time
+			// state.candidates leaks links from previous searches (e.g.
+			// Lisbon links appearing in a Porto reply).
+			const fresh = this.proposedThisTurn;
 			const hasMarkdownLink = /\]\(https?:\/\//.test(replyText);
 			let finalReply = replyText;
-			if (!hasMarkdownLink && candidates.length > 0) {
-				const linkLines = candidates
+			if (!hasMarkdownLink && fresh.length > 0) {
+				const linkLines = fresh
 					.filter((c) => c.productUrl)
 					.slice(0, 5)
 					.map((c, i) => `${i + 1}. [${c.title}](${c.productUrl})`);
