@@ -90,10 +90,15 @@ export class ViatorClient {
 				...(params.startDate ? { startDate: params.startDate } : {}),
 				...(params.endDate ? { endDate: params.endDate } : {}),
 			},
-			sorting: { sort: params.sortOrder ?? "DEFAULT", order: "ASCENDING" },
 			pagination: { start: 1, count: params.count ?? 5 },
 			currency: this.currency,
 		};
+		// `sort: DEFAULT` rejects an `order`; only ranked sorts (PRICE, RATING)
+		// take a direction. Omit the whole sorting block to let Viator apply
+		// its default ordering.
+		if (params.sortOrder && params.sortOrder !== "DEFAULT") {
+			body.sorting = { sort: params.sortOrder, order: "DESCENDING" };
+		}
 
 		const r = await fetch(`${this.baseUrl}/products/search`, {
 			method: "POST",
