@@ -54,6 +54,21 @@ export class TripAgent extends Agent<Env, TripState> {
 				messages: history,
 				tools: buildTools(this.env, this),
 				stopWhen: stepCountIs(6),
+				onStepFinish: ({ text, toolCalls, toolResults, finishReason }) => {
+					console.log("agent.step", {
+						finishReason,
+						toolCalls: toolCalls?.map((c) => c.toolName),
+						toolResultCount: toolResults?.length,
+						textPreview: text?.slice(0, 120),
+					});
+				},
+			});
+
+			console.log("agent.final", {
+				steps: result.steps?.length,
+				totalToolCalls: result.steps?.reduce((n, s) => n + (s.toolCalls?.length ?? 0), 0),
+				finishReason: result.finishReason,
+				textLen: result.text?.length ?? 0,
 			});
 
 			const replyText = result.text?.trim() || "Hmm — I couldn't put a reply together. Try rephrasing?";
