@@ -78,7 +78,25 @@ export class TripAgent extends Agent<Env, TripState> {
 			});
 
 			const replyText = result.text?.trim() || "Hmm — I couldn't put a reply together. Try rephrasing?";
-			const assistantMsg = { role: "assistant" as const, content: replyText };
+
+			// Belt and suspenders: if the model talked about activities but
+			// omitted the booking links (Llama 4 Scout often does), append
+			// a "Booking links" section pulled from the candidates the
+			// search tool just persisted into state.
+			const candidates = this.state.candidates ?? [];
+			const hasMarkdownLink = /\]\(https?:\/\//.test(replyText);
+			let finalReply = replyText;
+			if (!hasMarkdownLink && candidates.length > 0) {
+				const linkLines = candidates
+					.filter((c) => c.productUrl)
+					.slice(0, 5)
+					.map((c, i) => `${i + 1}. [${c.title}](${c.productUrl})`);
+				if (linkLines.length > 0) {
+					finalReply = `${replyText}\n\n— Booking links —\n${linkLines.join("\n")}`;
+				}
+			}
+
+			const assistantMsg = { role: "assistant" as const, content: finalReply };
 
 			// Persist trimmed history. We only keep plain user/assistant turns;
 			// tool calls are reconstructed each turn from current trip state.
@@ -89,7 +107,7 @@ export class TripAgent extends Agent<Env, TripState> {
 			];
 			this.setState({ ...this.state, messages: trimmed });
 
-			return replyText;
+			return finalReply;
 		} catch (err) {
 			console.error("agent.handleMessage failed", err);
 			return "Hit an internal error reasoning about that. Try again in a moment.";
