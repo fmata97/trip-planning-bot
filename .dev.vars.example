@@ -1,0 +1,9 @@
+# Copy to .dev.vars (gitignored) for local `wrangler dev` runs.
+# In production, these are set as Worker secrets via:
+#   npx wrangler secret put TELEGRAM_BOT_TOKEN
+#   npx wrangler secret put VIATOR_API_KEY
+#   npx wrangler secret put VIATOR_AFFILIATE_ID
+
+TELEGRAM_BOT_TOKEN=
+VIATOR_API_KEY=
+VIATOR_AFFILIATE_ID=
