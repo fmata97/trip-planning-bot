@@ -17,18 +17,37 @@ function htmlEscape(s: string): string {
 	return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+// Per viator_api_endpoints.md: prefer recommendedRetailPrice for user-facing
+// prices. Try a few common shapes since exact nesting depends on response
+// version; fall back to legacy `pricing.summary.fromPrice` if nothing matches.
+function extractPrice(p: ViatorProduct): { amount: number; currency: string } | null {
+	const rrp = p.recommendedRetailPrice as
+		| { fromPrice?: number; amount?: number; price?: number; currency?: string; currencyCode?: string }
+		| undefined;
+	if (rrp) {
+		const amount = rrp.fromPrice ?? rrp.amount ?? rrp.price;
+		if (typeof amount === "number") {
+			return { amount, currency: rrp.currency ?? rrp.currencyCode ?? "USD" };
+		}
+	}
+	const pricing = p.pricing as { summary?: { fromPrice?: number }; currency?: string } | undefined;
+	if (typeof pricing?.summary?.fromPrice === "number") {
+		return { amount: pricing.summary.fromPrice, currency: pricing.currency ?? "USD" };
+	}
+	return null;
+}
+
 function formatPrice(p: ViatorProduct): string {
-	const from = p.pricing?.summary?.fromPrice;
-	const cur = p.pricing?.currency ?? "USD";
-	if (typeof from !== "number") return "Price on Viator";
-	return `from ${cur} ${from.toFixed(0)}`;
+	const v = extractPrice(p);
+	if (!v) return "Price on Viator";
+	return `from ${v.currency} ${v.amount.toFixed(0)}`;
 }
 
 function formatRating(p: ViatorProduct): string {
-	const r = p.reviews?.combinedAverageRating;
-	const n = p.reviews?.totalReviews;
-	if (!r) return "";
-	return `⭐ ${r.toFixed(1)}${n ? ` (${n})` : ""}`;
+	const rating = p.rating ?? p.reviews?.combinedAverageRating;
+	const count = p.reviewCount ?? p.reviews?.totalReviews;
+	if (!rating) return "";
+	return `⭐ ${rating.toFixed(1)}${count ? ` (${count})` : ""}`;
 }
 
 export interface FormattedCard {
@@ -43,7 +62,7 @@ export function formatActivityCard(product: ViatorProduct, affiliateId: string |
 	const price = formatPrice(product);
 	const rating = formatRating(product);
 	const duration = product.duration?.description ?? "";
-	const url = decorateAffiliateUrl(product.productUrl ?? product.webURL, affiliateId);
+	const url = decorateAffiliateUrl(product.productUrl, affiliateId);
 
 	// Telegram caption hard-cap: 1024 chars. Keep this comfortably under.
 	const lines: string[] = [`<b>${title}</b>`];
