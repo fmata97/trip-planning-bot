@@ -20,18 +20,23 @@ export default {
 			botInfo = bot.botInfo;
 		}
 
-		bot.command("ping", (ctx) => ctx.reply("pong"));
+		bot.command("ping", (ctx) => {
+			console.log("cmd=/ping", { chatId: ctx.chat?.id, userId: ctx.from?.id });
+			return ctx.reply("pong");
+		});
 
-		bot.command("start", (ctx) =>
-			ctx.reply(
+		bot.command("start", (ctx) => {
+			console.log("cmd=/start", { chatId: ctx.chat?.id, userId: ctx.from?.id });
+			return ctx.reply(
 				"👋 I help group chats plan trips with Viator activities.\n\n" +
 					"Try: <code>/plan Lisbon</code> or <code>/plan Rome food history</code>",
 				{ parse_mode: "HTML" },
-			),
-		);
+			);
+		});
 
 		bot.command("plan", async (ctx) => {
 			const args = (ctx.match ?? "").trim();
+			console.log("cmd=/plan", { chatId: ctx.chat?.id, userId: ctx.from?.id, args });
 			if (!args) {
 				await ctx.reply(
 					"Tell me where: <code>/plan Lisbon</code> or <code>/plan Rome food history</code>",
