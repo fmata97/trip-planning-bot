@@ -1,12 +1,30 @@
 import { Bot, webhookCallback } from "grammy";
+import type { Context } from "grammy";
 import type { UserFromGetMe } from "grammy/types";
-import { ViatorClient, ViatorError } from "./tools/viator";
-import { formatActivityCard, sendActivityCard } from "./telegram/format";
+import { getAgentByName } from "agents";
+import { TripAgent } from "./agent";
 
-export { TripAgent } from "./agent";
+export { TripAgent };
 
 // Cache bot info across requests (per grammY Workers guide).
 let botInfo: UserFromGetMe | undefined;
+
+async function routeToAgent(env: Env, chatId: number, text: string, userId: number): Promise<string> {
+	const agent = await getAgentByName<Env, TripAgent>(env.TRIP_AGENT, `chat-${chatId}`);
+	return await agent.handleMessage(text, userId);
+}
+
+async function replyWithAgent(ctx: Context, env: Env, text: string): Promise<void> {
+	const chatId = ctx.chat?.id;
+	const userId = ctx.from?.id;
+	if (!chatId || !userId) return;
+	await ctx.replyWithChatAction("typing").catch(() => {}); // best-effort
+	const reply = await routeToAgent(env, chatId, text, userId);
+	await ctx.reply(reply, {
+		parse_mode: "HTML",
+		link_preview_options: { is_disabled: true },
+	});
+}
 
 export default {
 	async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
@@ -29,7 +47,8 @@ export default {
 			console.log("cmd=/start", { chatId: ctx.chat?.id, userId: ctx.from?.id });
 			return ctx.reply(
 				"👋 I help group chats plan trips with Viator activities.\n\n" +
-					"Try: <code>/plan Lisbon</code> or <code>/plan Rome food history</code>",
+					"Just talk to me: <i>plan us 3 days in Rome late May, food and history, budget 150 each</i>\n" +
+					"Or use <code>/plan Lisbon</code>.",
 				{ parse_mode: "HTML" },
 			);
 		});
@@ -38,53 +57,22 @@ export default {
 			const args = (ctx.match ?? "").trim();
 			console.log("cmd=/plan", { chatId: ctx.chat?.id, userId: ctx.from?.id, args });
 			if (!args) {
-				await ctx.reply(
-					"Tell me where: <code>/plan Lisbon</code> or <code>/plan Rome food history</code>",
+				return ctx.reply(
+					"Tell me where: <code>/plan Lisbon</code> or just describe the trip.",
 					{ parse_mode: "HTML" },
 				);
-				return;
 			}
+			await replyWithAgent(ctx, env, `Plan a trip: ${args}`);
+		});
 
-			const [destination, ...tagWords] = args.split(/\s+/);
-			const _tagWords = tagWords; // tag-id resolution comes in Phase 2 via the LLM
-
-			if (!env.VIATOR_API_KEY) {
-				await ctx.reply("⚠️ Viator API key not configured yet — ask the bot owner to set VIATOR_API_KEY.");
-				return;
-			}
-
-			const viator = new ViatorClient({ apiKey: env.VIATOR_API_KEY });
-
-			try {
-				await ctx.replyWithChatAction("typing");
-				const dest = await viator.resolveDestination(destination);
-				if (!dest) {
-					await ctx.reply(
-						`I couldn't find "${destination}" in Viator. Try a major city (Lisbon, Rome, Paris, London…).`,
-					);
-					return;
-				}
-
-				const search = await viator.searchProducts({ destinationId: dest.destinationId, count: 5 });
-				const products = search.products ?? [];
-				if (products.length === 0) {
-					await ctx.reply(`No activities found for ${dest.name}. The sandbox catalogue may be limited — try Rome, London, or Paris.`);
-					return;
-				}
-
-				await ctx.reply(
-					`Here are ${products.length} ideas for <b>${dest.name}</b>:`,
-					{ parse_mode: "HTML" },
-				);
-				for (const p of products) {
-					const card = formatActivityCard(p, env.VIATOR_AFFILIATE_ID);
-					await sendActivityCard(ctx, card);
-				}
-			} catch (err) {
-				const detail = err instanceof ViatorError ? `${err.endpoint} → ${err.status}` : String(err);
-				console.error("Viator request failed:", err);
-				await ctx.reply(`Hit an error talking to Viator (${detail}). Try again in a moment.`);
-			}
+		// Catch-all: any other text reaching us goes to the agent.
+		// In groups with privacy mode ON this only fires on @mentions / replies
+		// to the bot, which is exactly the surface we want.
+		bot.on("message:text", async (ctx) => {
+			const text = ctx.message.text;
+			if (text.startsWith("/")) return; // commands handled above
+			console.log("msg.text", { chatId: ctx.chat?.id, userId: ctx.from?.id, len: text.length });
+			await replyWithAgent(ctx, env, text);
 		});
 
 		return webhookCallback(bot, "cloudflare-mod")(request);
