@@ -120,8 +120,14 @@ export function buildTools(env: Env, agent: TripAgent) {
 					agent.setState(nextState);
 					// proposedThisTurn = the FULL current search result (not just
 					// new-to-state ones) so re-running /plan Lisbon still posts a
-					// fresh poll with the same activities.
-					agent.proposedThisTurn = [...agent.proposedThisTurn, ...candidates];
+					// fresh poll with the same activities. Dedupe by productCode
+					// — the LLM often calls searchActivities multiple times in
+					// one turn (e.g. for themed shortlists) and Viator returns
+					// the same top hits, which would otherwise produce a poll
+					// with "1-5..1-5" duplicates.
+					const proposedSeen = new Set(agent.proposedThisTurn.map((c) => c.productCode));
+					const freshProposed = candidates.filter((c) => !proposedSeen.has(c.productCode));
+					agent.proposedThisTurn = [...agent.proposedThisTurn, ...freshProposed];
 					return { destination: dest.name, count: summarised.length, products: summarised };
 				} catch (err) {
 					if (err instanceof ViatorError) {
