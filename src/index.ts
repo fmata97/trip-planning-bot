@@ -3,6 +3,7 @@ import type { Context } from "grammy";
 import type { UserFromGetMe } from "grammy/types";
 import { getAgentByName } from "agents";
 import { TripAgent } from "./agent";
+import { llamaMarkdownToTelegramHTML } from "./telegram/format";
 
 export { TripAgent };
 
@@ -20,7 +21,7 @@ async function replyWithAgent(ctx: Context, env: Env, text: string): Promise<voi
 	if (!chatId || !userId) return;
 	await ctx.replyWithChatAction("typing").catch(() => {}); // best-effort
 	const reply = await routeToAgent(env, chatId, text, userId);
-	await ctx.reply(reply, {
+	await ctx.reply(llamaMarkdownToTelegramHTML(reply), {
 		parse_mode: "HTML",
 		link_preview_options: { is_disabled: true },
 	});

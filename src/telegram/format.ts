@@ -17,6 +17,25 @@ function htmlEscape(s: string): string {
 	return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+// Convert the markdown that Llama emits into Telegram-flavoured HTML so it
+// actually renders. We HTML-escape first so any literal `<>&` from the
+// model become entities, then turn markdown syntax into <b>/<i> tags and
+// bullet markers into "•".
+export function llamaMarkdownToTelegramHTML(input: string): string {
+	let s = htmlEscape(input);
+	// Bold: **text** or __text__
+	s = s.replace(/\*\*([^*\n]+?)\*\*/g, "<b>$1</b>");
+	s = s.replace(/__([^_\n]+?)__/g, "<b>$1</b>");
+	// Italic: *text* or _text_ (only when not part of bold/url)
+	s = s.replace(/(^|[^*])\*([^*\n]+?)\*(?!\*)/g, "$1<i>$2</i>");
+	s = s.replace(/(^|[^_])_([^_\n]+?)_(?!_)/g, "$1<i>$2</i>");
+	// Inline code: `code`
+	s = s.replace(/`([^`\n]+?)`/g, "<code>$1</code>");
+	// Bullet markers at line start
+	s = s.replace(/^\s*[-*]\s+/gm, "• ");
+	return s;
+}
+
 function formatPrice(p: ViatorProduct): string {
 	const from = p.pricing?.summary?.fromPrice;
 	const cur = p.pricing?.currency ?? "USD";
