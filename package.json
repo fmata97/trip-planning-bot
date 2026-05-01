@@ -11,8 +11,16 @@
 	},
 	"devDependencies": {
 		"@cloudflare/vitest-pool-workers": "^0.12.4",
+		"@types/node": "^25.6.0",
 		"typescript": "^5.5.2",
 		"vitest": "~3.2.0",
-		"wrangler": "^3.101.0"
+		"wrangler": "^4.87.0"
+	},
+	"dependencies": {
+		"agents": "^0.12.0",
+		"ai": "^6.0.172",
+		"grammy": "^1.42.0",
+		"workers-ai-provider": "^3.1.13",
+		"zod": "^4.4.1"
 	}
 }
