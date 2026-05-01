@@ -57,9 +57,15 @@ export class TripAgent extends Agent<Env, TripState> {
 				onStepFinish: ({ text, toolCalls, toolResults, finishReason }) => {
 					console.log("agent.step", {
 						finishReason,
-						toolCalls: toolCalls?.map((c) => c.toolName),
-						toolResultCount: toolResults?.length,
-						textPreview: text?.slice(0, 120),
+						toolCalls: toolCalls?.map((c) => ({
+							name: c.toolName,
+							input: JSON.stringify(c.input).slice(0, 300),
+						})),
+						toolResults: toolResults?.map((r) => ({
+							name: r.toolName,
+							output: JSON.stringify(r.output ?? (r as { result?: unknown }).result).slice(0, 500),
+						})),
+						textPreview: text?.slice(0, 200),
 					});
 				},
 			});
