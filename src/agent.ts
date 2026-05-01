@@ -60,11 +60,11 @@ export interface VoteCounts {
 }
 
 const HISTORY_CAP = 30;
-// Workers AI Gemma 4 26B A4B Instruct — Mixture-of-Experts (26B total / 4B
-// active), released April 2026 on Workers AI, with native tool-calling
-// support. Stronger at multi-step reasoning and instruction following than
-// Llama 4 Scout 17B for our agentic flow.
-const MODEL = "@cf/google/gemma-4-26b-a4b-it";
+// Workers AI Llama 4 Scout 17B Instruct. Tried Gemma 4 26B; per-step latency
+// blew past the agents-SDK 10s RPC cap and the model exhausted maxOutputTokens
+// before emitting final text. Llama 4 Scout fits the latency budget and the
+// markdownLine-copy contract in the prompt does most of the formatting work.
+const MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct";
 
 // One TripAgent instance per Telegram group chat (named `chat-<chat_id>`).
 // Per-chat state (history, current trip, candidate activities, votes) is
