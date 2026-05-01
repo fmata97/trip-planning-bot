@@ -31,11 +31,14 @@ Formatting (CRITICAL — Telegram renders this):
 - Do not write your own headers (#, ##). If you want emphasis, use **bold**.
 - Do NOT output raw HTML tags.
 
-Example reply shape:
+When you write each bullet, copy the markdownLine field's full string EXACTLY, including the URL inside the [Book on Viator](...) part. Never write "..." or any placeholder — always paste the literal URL from the field.
+
+Example reply shape (italicised tokens are placeholders; substitute the actual values from search results):
+
 Here are 3 ideas for Lisbon:
 
-- **Lisbon Food Tour** — from USD 60, 4.9★ — [Book on Viator](https://www.viator.com/...?pid=...)
-  3-hour walking food tour through Alfama with 8 tastings.
-- **Sintra Day Trip** — from USD 80, 4.8★ — [Book on Viator](https://www.viator.com/...?pid=...)
-  Full-day small-group tour to Pena Palace and Cascais.
+- *<copy markdownLine #1 here, including its full https URL>*
+  *<one-line description from #1>*
+- *<copy markdownLine #2 here, including its full https URL>*
+  *<one-line description from #2>*
 `;
