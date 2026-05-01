@@ -1,6 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { ViatorClient, ViatorError } from "./viator";
+import { decorateAffiliateUrl } from "../affiliate";
 import type { TripAgent, TripState, CandidateProduct } from "../agent";
 
 // Tools surfaced to the Workers AI Llama for tool-calling. Keeping the
@@ -24,6 +25,9 @@ export function buildTools(env: Env, agent: TripAgent) {
 		const rrp = p.recommendedRetailPrice as { fromPrice?: number; amount?: number; currency?: string } | undefined;
 		const priceFrom = rrp?.fromPrice ?? rrp?.amount ?? p.pricing?.summary?.fromPrice;
 		const currency = rrp?.currency ?? p.pricing?.currency ?? "USD";
+		// Affiliate-decorated booking URL — falls back to raw productUrl if
+		// VIATOR_AFFILIATE_ID is unset. The LLM is instructed to surface this.
+		const bookUrl = decorateAffiliateUrl(p.productUrl, env.VIATOR_AFFILIATE_ID);
 		return {
 			productCode: p.productCode,
 			title: p.title,
@@ -33,7 +37,7 @@ export function buildTools(env: Env, agent: TripAgent) {
 			currency,
 			rating: p.rating ?? p.reviews?.combinedAverageRating,
 			reviewCount: p.reviewCount ?? p.reviews?.totalReviews,
-			productUrl: p.productUrl,
+			bookUrl,
 		};
 	}
 
@@ -59,7 +63,7 @@ export function buildTools(env: Env, agent: TripAgent) {
 						productCode: s.productCode,
 						title: s.title,
 						shortDescription: s.shortDescription,
-						productUrl: s.productUrl,
+						productUrl: s.bookUrl,
 						priceFrom: s.priceFrom,
 						currency: s.currency,
 						rating: s.rating,

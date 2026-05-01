@@ -23,6 +23,9 @@ function htmlEscape(s: string): string {
 // bullet markers into "•".
 export function llamaMarkdownToTelegramHTML(input: string): string {
 	let s = htmlEscape(input);
+	// Markdown links: [text](url) — must come before bold/italic so the URL
+	// isn't munged. URL was already html-escaped, &amp; in URLs is fine.
+	s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2">$1</a>');
 	// Bold: **text** or __text__
 	s = s.replace(/\*\*([^*\n]+?)\*\*/g, "<b>$1</b>");
 	s = s.replace(/__([^_\n]+?)__/g, "<b>$1</b>");
