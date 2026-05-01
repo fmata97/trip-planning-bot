@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { ViatorClient, ViatorError, type ViatorProduct } from "./viator";
+import { ViatorClient, ViatorError } from "./viator";
 import type { TripAgent, TripState, CandidateProduct } from "../agent";
 
 // Tools surfaced to the Workers AI Llama for tool-calling. Keeping the
@@ -9,13 +9,21 @@ import type { TripAgent, TripState, CandidateProduct } from "../agent";
 export function buildTools(env: Env, agent: TripAgent) {
 	const viator = new ViatorClient({ apiKey: env.VIATOR_API_KEY });
 
-	function summariseProduct(p: ViatorProduct) {
-		const rrp = p.recommendedRetailPrice as
-			| { fromPrice?: number; amount?: number; currency?: string }
-			| undefined;
-		const pricing = p.pricing as { summary?: { fromPrice?: number }; currency?: string } | undefined;
-		const priceFrom = rrp?.fromPrice ?? rrp?.amount ?? pricing?.summary?.fromPrice;
-		const currency = rrp?.currency ?? pricing?.currency ?? "USD";
+	function summariseProduct(p: {
+		productCode: string;
+		title: string;
+		shortDescription?: string;
+		productUrl?: string;
+		duration?: { description?: string };
+		pricing?: { summary?: { fromPrice?: number }; currency?: string };
+		recommendedRetailPrice?: unknown;
+		reviews?: { combinedAverageRating?: number; totalReviews?: number };
+		rating?: number;
+		reviewCount?: number;
+	}) {
+		const rrp = p.recommendedRetailPrice as { fromPrice?: number; amount?: number; currency?: string } | undefined;
+		const priceFrom = rrp?.fromPrice ?? rrp?.amount ?? p.pricing?.summary?.fromPrice;
+		const currency = rrp?.currency ?? p.pricing?.currency ?? "USD";
 		return {
 			productCode: p.productCode,
 			title: p.title,
