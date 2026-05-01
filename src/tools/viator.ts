@@ -108,7 +108,7 @@ export class ViatorClient {
 		const body: Record<string, unknown> = {
 			filtering,
 			currency: this.currencyCode,
-			pagination: { offset: 0, limit: params.count ?? 5 },
+			pagination: { start: 1, count: params.count ?? 5 },
 		};
 		if (params.sortBy) {
 			body.sorting = { sort: params.sortBy, order: params.order ?? "DESCENDING" };
@@ -134,9 +134,8 @@ export class ViatorClient {
 	async resolveDestination(text: string): Promise<ViatorDestinationHit | null> {
 		const body = {
 			searchTerm: text,
-			searchType: "DESTINATIONS",
+			searchTypes: [{ searchType: "DESTINATIONS", pagination: { start: 1, count: 5 } }],
 			currency: this.currencyCode,
-			pagination: { offset: 0, limit: 5 },
 		};
 		const r = await fetch(`${this.baseUrl}/search/freetext`, {
 			method: "POST",
@@ -176,9 +175,8 @@ export class ViatorClient {
 	async freetextProducts(searchTerm: string, opts?: { tags?: number[]; limit?: number }): Promise<ViatorSearchResponse> {
 		const body: Record<string, unknown> = {
 			searchTerm,
-			searchType: "PRODUCTS",
+			searchTypes: [{ searchType: "PRODUCTS", pagination: { start: 1, count: opts?.limit ?? 5 } }],
 			currency: this.currencyCode,
-			pagination: { offset: 0, limit: opts?.limit ?? 5 },
 		};
 		if (opts?.tags?.length) body.filtering = { tags: opts.tags };
 
