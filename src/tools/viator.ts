@@ -3,7 +3,7 @@
 // Viator engineer should confirm the exact header name (`exp-api-key`) and
 // sandbox base URL before we ship the demo.
 
-const DEFAULT_BASE_URL = "https://api.viator.com/partner";
+const DEFAULT_BASE_URL = "https://api.sandbox.viator.com";
 const ACCEPT = "application/json;version=2.0";
 
 export interface ViatorClientOptions {
